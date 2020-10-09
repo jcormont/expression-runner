@@ -2,7 +2,13 @@
 
 Simple JavaScript expression compiler: given a JavaScript expression as a string, generates a function that evaluates the expression.
 
-JavaScript syntax allowed:
+**Install:** `npm install expression-runner`
+
+---
+
+## Syntax
+
+The following JavaScript syntax is allowed within compiled expressions:
 
 - literal tokens (strings, numbers, etc. but not regular expressions)
 - array and object literals (e.g. `[1, 2]`, `{ a: 1 }`, `{ a, b }`)
