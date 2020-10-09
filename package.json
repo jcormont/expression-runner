@@ -1,0 +1,33 @@
+{
+  "name": "expression-runner",
+  "version": "1.0.0",
+  "description": "Compile and run JavaScript expressions safely",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p src",
+    "test": "node test/test.js",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "keywords": [
+    "javascript",
+    "expressions",
+    "runner",
+    "compiler",
+    "interpreter",
+    "safe"
+  ],
+  "author": "Jelmer Cormont",
+  "license": "MIT",
+  "prettier": {
+    "printWidth": 100
+  },
+  "devDependencies": {
+    "typescript": "^4.0.3"
+  }
+}
