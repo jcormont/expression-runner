@@ -1,6 +1,6 @@
 {
   "name": "expression-runner",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Compile and run JavaScript expressions safely",
   "main": "index.js",
   "types": "index.d.ts",
