@@ -17,6 +17,27 @@ function test(name, fn) {
 
 console.log("Starting test...");
 
+test("Use literals", (t) => {
+  t.expect(compile("1")(), 1);
+  t.expect(compile("1.23")(), 1.23);
+  t.expect(compile("1.2e3")(), 1.2e3);
+  t.expect(compile("1.2E3")(), 1.2e3);
+  t.expect(compile(".123")(), 0.123);
+  t.expect(compile("0x01")(), 1);
+  t.expect(compile("-1")(), -1);
+  t.expect(compile("'a'")(), "a");
+  t.expect(compile('"a"')(), "a");
+  t.expect(compile("true")(), true);
+  t.expect(compile("false")(), false);
+  t.expect(compile("undefined")(), undefined);
+  t.expect(compile("[].length")(), 0);
+  t.expect(compile("[1].length")(), 1);
+  t.expect(compile("[][0]")(), undefined);
+  t.expect(compile("[1][0]")(), 1);
+  t.expect(compile("[3,2,1][2]")(), 1);
+  t.expect(compile("[3,,1][2]")(), 1);
+});
+
 test("Use variables", (t) => {
   let context = { a: 1 };
   t.expect(compile("a")(context), 1);
@@ -31,6 +52,24 @@ test("Use operators", (t) => {
   t.expect(compile("a + b")(context), 3);
   t.expect(compile("b * a + 8")(context), 10);
   t.expect(compile("a + b * 2")(context), 5);
+});
+
+test("Use object spread", (t) => {
+  let context = { a: { a: 41 }, b: 2 };
+  t.expect(compile("{ ...a, b }.a")(context), 41);
+  t.expect(compile("{ b, ...a }.a")(context), 41);
+  t.expect(compile("{ b, ...a, }.a")(context), 41);
+  t.expect(compile("{ b, ...a, c: 0 }.a")(context), 41);
+  t.expect(compile("{ b, ...a, ...a }.a")(context), 41);
+});
+
+test("Use array spread", (t) => {
+  let context = { a: [1, 2, 3] };
+  t.expect(compile("[...a, 4, 5].join(',')")(context), "1,2,3,4,5");
+  t.expect(compile("[0, ...a, 4].join(',')")(context), "0,1,2,3,4");
+  t.expect(compile("[0, ...a].join(',')")(context), "0,1,2,3");
+  t.expect(compile("[0, ...a,].length")(context), 4);
+  t.expect(compile("[...a, ...a].length")(context), 6);
 });
 
 test("Use null-coalescing", (t) => {
