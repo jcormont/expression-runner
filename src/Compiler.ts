@@ -53,9 +53,10 @@ export enum OPS {
   call,
   object,
   array,
+  spread,
   undef,
+  resolve,
   coalesce,
-  _resolve,
 }
 export const ALL_UNARY_SAFE = ["+", "-", "~", "!", "typeof"];
 export const ALL_CALC_SAFE = [
@@ -179,7 +180,17 @@ class SynTree {
   getOutput(): string | any[] {
     if (this.outToken) return this.text!;
     if (this.outValue) return eval(this.text!);
-    let result = this.op === OPS._resolve ? [] : [<any>this.op];
+    if (
+      this.op === OPS.expression &&
+      this.children &&
+      this.children.length === 1 &&
+      !this.children[0].outToken &&
+      !this.children[0].outValue
+    ) {
+      return this.children[0].getOutput();
+    }
+    //let result = this.op === OPS._resolve ? [] : [<any>this.op];
+    let result = [<any>this.op];
     if (this.children) {
       for (let n of this.children) {
         if (n.op || n.outToken || n.outValue) result.push(n.getOutput());
@@ -284,8 +295,8 @@ export class Compiler {
         let type = matchToken(Compiler._regex.id)
           ? NodeType.token_id
           : matchToken(
-              Compiler._regex.number,
               Compiler._regex.numberHex,
+              Compiler._regex.number,
               Compiler._regex.stringDbl,
               Compiler._regex.stringSgl
             )
@@ -543,11 +554,11 @@ export class Compiler {
         result = new SynTree(
           this,
           NodeType.member,
-          operator.text[0] === "?" ? OPS.coalesce : OPS._resolve
+          operator.text[0] === "?" ? OPS.coalesce : OPS.resolve
         );
         result.children = this._tree.splice(idx, 3, result);
         result.children[2].outToken = true;
-        if (result.children[0].op === OPS._resolve) {
+        if (result.children[0].op === OPS.resolve) {
           let nestedChildren = result.children.shift()!.children!;
           result.children.forEach((n) => nestedChildren.push(n));
           result.children = nestedChildren;
@@ -574,9 +585,9 @@ export class Compiler {
           ]);
         }
         // insert new member expression
-        result = new SynTree(this, NodeType.member, OPS._resolve);
+        result = new SynTree(this, NodeType.member, OPS.resolve);
         result.children = this._tree.splice(idx, 4, result);
-        if (result.children[0].op === OPS._resolve) {
+        if (result.children[0].op === OPS.resolve) {
           let nestedChildren = result.children.shift()!.children!;
           result.children.forEach((n) => nestedChildren.push(n));
           result.children = nestedChildren;
@@ -625,6 +636,94 @@ export class Compiler {
     return true;
   }
 
+  private _expectObject(idx: number) {
+    let result = new SynTree(this, NodeType.object, OPS.object);
+    let offset = 1;
+    while (!this._matchText(idx + offset, "}")) {
+      if (this._matchText(idx + offset, ",")) {
+        offset++;
+        continue;
+      }
+      let keyNode = this._tree[idx + offset];
+      if (keyNode.text === "...") {
+        // object spread
+        if (!this._expectExpression(idx + offset + 1, false)) return false;
+        let exprNode = this._tree[idx + offset + 1];
+        let spreadNode = new SynTree(this, NodeType.expression, OPS.spread, [exprNode]);
+        this._tree.splice(idx + offset, 2, spreadNode);
+        offset++;
+        continue;
+      } else if (keyNode.type === NodeType.token_id) {
+        // key is a token
+        keyNode.outToken = true;
+
+        // check if using variable as property
+        if (this._matchText(idx + offset + 1, [",", "}"])) {
+          let valueNode = new SynTree(this, NodeType.resolve, OPS.resolve, [keyNode]);
+          this._tree.splice(idx + offset + 1, 0, valueNode);
+          offset += 2;
+          continue;
+        }
+      } else if (keyNode.type === NodeType.token_literal) {
+        // key is a number or string
+        keyNode.outValue = true;
+      } else {
+        this._unexpected = keyNode;
+        return false;
+      }
+      if (this._tree.length < idx + offset + 3 || !this._matchText(idx + offset + 1, ":")) {
+        this._unexpected = this._tree[idx + offset];
+        return false;
+      }
+
+      // parse expression (up to comma)
+      if (!this._expectExpression(idx + offset + 2, false)) return false;
+
+      // look for object closing bracket or comma
+      offset += 3;
+      if (!this._matchText(idx + offset, "}") && !this._matchText(idx + offset, ",")) {
+        this._unexpected = this._tree[idx + offset - 1];
+        return false;
+      }
+    }
+    result.children = this._tree.splice(idx, offset + 1, result);
+    return true;
+  }
+
+  private _expectArray(idx: number) {
+    let result = new SynTree(this, NodeType.array, OPS.array);
+    let offset = 1;
+    while (true) {
+      // check for array end
+      if (this._matchText(idx + offset, "]")) break;
+
+      // check another expression
+      if (this._matchText(idx + offset, ",")) {
+        this._tree.splice(idx + offset, 0, new SynTree(this, NodeType.token_literal, OPS.undef));
+      } else if (this._matchText(idx + offset, "...")) {
+        // array spread
+        if (!this._expectExpression(idx + offset + 1, false)) return false;
+        let exprNode = this._tree[idx + offset + 1];
+        let spreadNode = new SynTree(this, NodeType.expression, OPS.spread, [exprNode]);
+        this._tree.splice(idx + offset, 2, spreadNode);
+      } else if (!this._expectExpression(idx + offset, false)) {
+        return false;
+      }
+      offset++;
+
+      // must find a comma or end here
+      if (this._matchText(idx + offset, ",")) {
+        offset++;
+      } else if (!this._matchText(idx + offset, "]")) {
+        this._unexpected = this._tree[idx + offset];
+        return false;
+      }
+    }
+
+    result.children = this._tree.splice(idx, offset + 1, result);
+    return true;
+  }
+
   private _expectUnary(idx: number) {
     if (this._tree.length <= idx) return false;
     if (this._matchText(idx, ALL_UNARY_SAFE)) {
@@ -652,71 +751,20 @@ export class Compiler {
       return true;
     }
 
-    // look for primary expressions
+    // look for literals
     if (this._matchText(idx, "{")) {
-      // check for object literal
-      let result = new SynTree(this, NodeType.object, OPS.object);
-      let offset = 1;
-      while (!this._matchText(idx + offset, "}")) {
-        if (this._matchText(idx + offset, ",")) {
-          offset++;
-          continue;
-        }
-        let keyNode = this._tree[idx + offset];
-        if (keyNode.type === NodeType.token_id) {
-          // key is a token
-          keyNode.outToken = true;
-
-          // check if using variable as property
-          if (this._matchText(idx + offset + 1, [",", "}"])) {
-            let valueNode = new SynTree(this, NodeType.resolve, OPS._resolve, [keyNode]);
-            this._tree.splice(idx + offset + 1, 0, valueNode);
-            offset += 2;
-            continue;
-          }
-        } else if (keyNode.type === NodeType.token_literal) {
-          // key is a number or string
-          keyNode.outValue = true;
-        } else {
-          this._unexpected = keyNode;
-          return false;
-        }
-        if (this._tree.length < idx + offset + 3 || !this._matchText(idx + offset + 1, ":")) {
-          this._unexpected = this._tree[idx + offset];
-          return false;
-        }
-
-        // parse expression (up to comma)
-        if (!this._expectExpression(idx + offset + 2, false)) return false;
-
-        // look for object closing bracket or comma
-        offset += 3;
-        if (this._matchText(idx + offset, "}")) continue;
-        if (!this._matchText(idx + offset, ",")) {
-          this._unexpected = this._tree[idx + offset - 1];
-          return false;
-        }
-      }
-      result.children = this._tree.splice(idx, offset + 1, result);
+      return this._expectObject(idx);
+    }
+    if (this._matchText(idx, "[")) {
+      return this._expectArray(idx);
+    }
+    if (this._tree[idx].type === NodeType.token_literal) {
+      this._tree[idx].outValue = true;
       return true;
-    } else if (this._matchText(idx, "[")) {
-      // check for empty array
-      if (this._matchText(idx + 1, "]")) {
-        // add empty array node
-        this._tree.splice(idx, 2, new SynTree(this, NodeType.array, OPS.array));
-        return true;
-      }
+    }
 
-      // check for array
-      if (!this._expectExpression(idx + 1)) return false;
-
-      // replace expression node with array node
-      let arrayNode = this._tree[idx + 1];
-      arrayNode.type = NodeType.array;
-      arrayNode.op = OPS.array;
-      this._tree.splice(idx, 3, arrayNode);
-      return true;
-    } else if (this._tree[idx].type === NodeType.token_id && !this._matchText(idx + 1, "=>")) {
+    // look for identifiers (or wordy literals)
+    if (this._tree[idx].type === NodeType.token_id && !this._matchText(idx + 1, "=>")) {
       // found an identifier: check if literal or variable
       let node = this._tree[idx];
       let text = node.text!;
@@ -731,19 +779,18 @@ export class Compiler {
         this._unexpected = node;
         return false;
       } else {
-        let resolver = new SynTree(this, NodeType.resolve, OPS._resolve, [node]);
+        let resolver = new SynTree(this, NodeType.resolve, OPS.resolve, [node]);
         node.outToken = true;
         this._tree[idx] = resolver;
       }
       return true;
-    } else if (this._tree[idx].type === NodeType.token_literal) {
-      this._tree[idx].outValue = true;
-      return true;
-    } else if (
+    }
+
+    // look for bracketed expressions
+    if (
       this._tree[idx].type === NodeType.arrow_function ||
       this._expectArrowFunctionOrBraced(idx)
     ) {
-      // found a literal or braced expression
       return true;
     }
 
@@ -753,11 +800,11 @@ export class Compiler {
 
   static readonly _regex: { [id: string]: RegExp } = {
     space: /^(?:\\\r?\n|\s+)/,
-    number: /^(?=[1-9]|0(?!\d))[_\d]+(\.\d+)?([eE][+-]?\d+)?/,
     numberHex: /^0x[0-9A-F]+/,
+    number: /^(?=[1-9]|0(?!\d))[_\d]+(\.\d+)?([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?/,
     stringDbl: /^\"(?:[^\\\"]+|\\["'\\bfnrt\/]|\\u[0-9a-f]{4})*\"/,
     stringSgl: /^\'(?:[^\\\']+|\\["'\\bfnrt\/]|\\u[0-9a-f]{4})*\'/,
     id: /^@?[a-zA-Z_$][\w$]*/,
-    punct: /^(?:\:\:|\+=|-=|\*=|\/=|%=|===|!==|!=|==|>>>|>>|<<|>=|<=|=>|\?\?|\&\&|\|\||\?\.|[\{\}\(\)\[\]\.:;,<>\?~!^\|\&%\/\*\-\+=])/,
+    punct: /^(?:\:\:|\+=|-=|\*=|\/=|%=|===|!==|!=|==|>>>|>>|<<|>=|<=|=>|\?\?|\&\&|\|\||\?\.|\.\.\.|[\{\}\(\)\[\]\.:;,<>\?~!^\|\&%\/\*\-\+=])/,
   };
 }

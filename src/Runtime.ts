@@ -156,8 +156,9 @@ export abstract class Runtime {
       switch (expr[0]) {
         case OPS.assign:
           // (LHS in expr[1] is always a 'resolve' operation)
-          let isVarToAssign = !Array.isArray(expr[1][0]) ? 1 : 0;
-          let lhsExpr = follow(expr[1]); // single variable
+          if (expr[1][0] !== OPS.resolve) throw TypeError();
+          let isVarToAssign = !Array.isArray(expr[1][1]) ? 1 : 0;
+          let lhsExpr = follow(expr[1].slice(1));
           let valueExpr = expand(expr[3]);
           return (
             ASSIGN_FN +
@@ -216,26 +217,37 @@ export abstract class Runtime {
         case OPS.call:
           return CALL_FN + "(" + follow(expr.slice(1)) + ")";
         case OPS.object:
-          if ((expr.length - 1) % 2) throw new SyntaxError();
-          let objMembers = expr
-            .slice(1)
-            .map(expand)
-            .reduce((arr, s, i) => {
-              if (i % 2) arr[arr.length - 1] += ": " + s;
-              else arr.push(s);
-              return arr;
-            }, [] as string[]);
+          let objMembers: string[] = [];
+          for (let idx = 1; idx < expr.length; idx++) {
+            if (Array.isArray(expr[idx]) && expr[idx][0] === OPS.spread) {
+              objMembers.push("..." + expand(expr[idx][1]));
+            } else {
+              let prop = expand(expr[idx++]);
+              let val = expand(expr[idx]);
+              objMembers.push(prop + ": " + val);
+            }
+          }
           return "{" + objMembers.join() + "}";
         case OPS.array:
-          return "[" + follow(expr.slice(1)) + "]";
+          let arrElts: string[] = [];
+          for (let idx = 1; idx < expr.length; idx++) {
+            if (Array.isArray(expr[idx]) && expr[idx][0] === OPS.spread) {
+              arrElts.push("..." + expand(expr[idx][1]));
+            } else {
+              arrElts.push(expand(expr[idx]));
+            }
+          }
+          return "[" + arrElts.join() + "]";
         case OPS.undef:
           return "undefined";
         case OPS.coalesce:
           let isVarToCoalesce = !Array.isArray(expr[1]) ? 1 : 0;
           return RESOLVE_FN + "(1," + isVarToCoalesce + "," + follow(expr.slice(1)) + ")";
+        case OPS.resolve:
+          let isVarToResolve = !Array.isArray(expr[1]) ? 1 : 0;
+          return RESOLVE_FN + "(0," + isVarToResolve + "," + follow(expr.slice(1)) + ")";
         default:
-          let isVarToResolve = !Array.isArray(expr[0]) ? 1 : 0;
-          return RESOLVE_FN + "(0," + isVarToResolve + "," + follow(expr) + ")";
+          throw TypeError();
       }
     };
 
