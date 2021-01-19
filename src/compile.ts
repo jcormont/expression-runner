@@ -4,10 +4,17 @@ import { Runtime } from "./Runtime";
 /** Compile given expression, returns a function that runs the expression with given variables */
 export function compile(
   expression: string,
-  allowAssignment?: boolean,
+  options:
+    | true
+    | {
+        allowAssignment?: boolean;
+        allowStatement?: boolean;
+      } = {},
   extraFunctions?: { [id: string]: Function }
 ) {
-  let compiled = new Compiler(String(expression)).compile(allowAssignment);
+  if (options === true) options = { allowStatement: true };
+  let compiled = new Compiler(String(expression), options).compile();
+  console.log(JSON.stringify(compiled));
   let Factory = Runtime.scopeFactory(compiled);
   return (vars: any) => {
     let functions = extraFunctions

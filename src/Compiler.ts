@@ -47,7 +47,7 @@ export enum OPS {
   assign,
   expression,
   arrowfunc,
-  tertiary,
+  ternary,
   calc,
   unary,
   call,
@@ -58,7 +58,7 @@ export enum OPS {
   resolve,
   coalesce,
 }
-export const ALL_UNARY_SAFE = ["+", "-", "~", "!", "typeof"];
+export const ALL_UNARY_SAFE = ["+", "-", "~", "!", "typeof", "delete"];
 export const ALL_CALC_SAFE = [
   "||",
   "&&",
@@ -97,7 +97,7 @@ enum NodeType {
   call = "call expression",
   unary = "unary expression",
   calc = "dual operand expression",
-  tertiary = "tertiary expression",
+  ternary = "ternary expression",
   arrow_function = "arrow function",
   expression = "expression",
   assign = "assignment",
@@ -171,6 +171,7 @@ class SynTree {
 
     // get text in front of this token and match with regex
     let before = this._compiler.input.slice(0, pos);
+    if (/^\s*$/.test(before)) return true;
     return /\n\s*$/.test(before.replace(/\\\r?\n/g, ""));
   }
 
@@ -189,7 +190,6 @@ class SynTree {
     ) {
       return this.children[0].getOutput();
     }
-    //let result = this.op === OPS._resolve ? [] : [<any>this.op];
     let result = [<any>this.op];
     if (this.children) {
       for (let n of this.children) {
@@ -216,13 +216,17 @@ class SynTree {
 
 /** Code compiler, converts simple expressions to JSON code */
 export class Compiler {
-  constructor(public readonly input: string) {
+  constructor(
+    public readonly input: string,
+    public options: { allowStatement?: boolean; allowAssignment?: boolean }
+  ) {
+    if (options.allowStatement) options.allowAssignment = true;
     // nothing to do here
   }
 
   /** Returns JSON (stringified) result */
-  compile(allowAssignment?: boolean) {
-    this._parser(allowAssignment);
+  compile() {
+    this._parser();
     if (this._tree.length > 1) throw new Error();
     let result = this._tree[0].getOutput();
     return Array.isArray(result) ? result : [result];
@@ -237,7 +241,7 @@ export class Compiler {
   private _tree: SynTree[] = [];
 
   /** Parser: generates a full syntree down to a single expression, or fails */
-  private _parser(allowAssignment?: boolean) {
+  private _parser() {
     if (!this._tree.length) this._lex();
     let idx = 0;
     let throwUnexpected = () => {
@@ -249,29 +253,29 @@ export class Compiler {
           (unexpected && unexpected.text ? ": " + unexpected.text : "")
       );
     };
-    while (true) {
-      // remove semicolons at top level
-      let isNewStatement = idx === 0;
-      while (
-        idx < this._tree.length &&
-        this._tree[idx].type === NodeType.token_punct &&
-        this._tree[idx].text === ";"
-      ) {
+    let isNewStatement = true;
+    while (idx < this._tree.length) {
+      if (this._matchText(idx, ";")) {
         this._tree.splice(idx, 1);
         isNewStatement = true;
+        continue;
       }
-      if (idx >= this._tree.length) break;
-
-      // check if expecting a new statement/expression, then read it
-      if (!isNewStatement && this._tree[idx].isOnNewLine()) {
-        isNewStatement = true;
+      if (
+        (!isNewStatement && !this._tree[idx].isOnNewLine()) ||
+        (this.options.allowStatement ? !this._expectStatement(idx) : !this._expectExpression(idx))
+      ) {
+        throwUnexpected();
       }
-      if (!isNewStatement || !this._expectExpression(idx, true, allowAssignment)) throwUnexpected();
+      isNewStatement = false;
       idx++;
     }
 
     // merge everything into one expression
     if (this._tree.length > 1) {
+      if (this._tree[0].type !== NodeType.expression) {
+        let root = new SynTree(this, NodeType.expression, OPS.expression, [this._tree[0]]);
+        this._tree[0] = root;
+      }
       for (let e of this._tree.splice(1)) {
         this._tree[0].children!.push(...e.children!);
       }
@@ -326,9 +330,60 @@ export class Compiler {
     else return false;
   }
 
-  private _expectExpression(idx: number, multiExpr = true, allowAssignment = false) {
-    if (this._tree.length <= idx) return false;
-    if (!this._expectTertiary(idx)) return false;
+  private _expectStatement(idx: number) {
+    switch (this._tree[idx].text) {
+      case ";":
+        return true;
+      case "{":
+        return this._expectBlock(idx);
+      case "if":
+        return this._expectIfStatement(idx);
+      default:
+        return this._expectExpression(idx, true);
+    }
+  }
+
+  private _expectBlock(idx: number) {
+    let expr = new SynTree(this, NodeType.expression, OPS.expression, []);
+    let isNewStatement = true;
+    idx++;
+    while (idx < this._tree.length) {
+      if (this._matchText(idx, "}")) break;
+      if (this._matchText(idx, ";")) {
+        this._tree.splice(idx, 1);
+        isNewStatement = true;
+        continue;
+      }
+      if (!isNewStatement && !this._tree[idx].isOnNewLine()) {
+        this._unexpected = this._tree[idx];
+        return false;
+      }
+      if (!this._expectStatement(idx)) return false;
+      expr.children!.push(...this._tree.splice(idx, 1));
+      isNewStatement = false;
+    }
+    this._tree.splice(idx - 1, 2, expr);
+    return true;
+  }
+
+  private _expectIfStatement(idx: number) {
+    if (!this._matchText(idx + 1, "(")) return false;
+    if (!this._expectExpression(idx + 2, true)) return false;
+    if (!this._matchText(idx + 3, ")")) {
+      if (!this._unexpected) this._unexpected = this._tree[idx + 3];
+      return false;
+    }
+    if (!this._expectStatement(idx + 4)) return false;
+    let stmt = new SynTree(this, NodeType.ternary, OPS.ternary, [
+      this._tree[idx + 2],
+      this._tree[idx + 4],
+    ]);
+    this._tree.splice(idx, 5, stmt);
+    return true;
+  }
+
+  private _expectExpression(idx: number, multiExpr = true) {
+    if (!this._expectTernary(idx)) return false;
 
     // found an expression
     let result = this._tree[idx];
@@ -340,10 +395,10 @@ export class Compiler {
 
     // check if this is the LHS of an assignment
     if (this._matchText(idx + 1, ["=", "+=", "-=", "*=", "/=", "%="])) {
-      if (!allowAssignment) {
+      if (!this.options.allowAssignment) {
         throw new SyntaxError("Assignment not allowed in this expression");
       }
-      if (!this._expectExpression(idx + 2, false, allowAssignment)) {
+      if (!this._expectExpression(idx + 2, false)) {
         if (!this._unexpected) this._unexpected = this._tree[idx + 1];
         return false;
       }
@@ -364,7 +419,7 @@ export class Compiler {
 
     // now look for commas to continue
     while (multiExpr && this._matchText(idx + 1, ",")) {
-      if (!this._expectExpression(idx + 2, false, allowAssignment)) {
+      if (!this._expectExpression(idx + 2, false)) {
         if (!this._unexpected) this._unexpected = this._tree[idx + 1];
         return false;
       }
@@ -467,7 +522,7 @@ export class Compiler {
     return false;
   }
 
-  private _expectTertiary(idx: number) {
+  private _expectTernary(idx: number) {
     if (this._tree.length <= idx) return false;
     if (!this._expectCalc(idx)) return false;
     if (this._matchText(idx + 1, "?") && !this._matchText(idx + 1, "?.")) {
@@ -476,7 +531,7 @@ export class Compiler {
       if (!this._expectExpression(idx + 4, false)) return false;
 
       // found a conditional
-      let result = new SynTree(this, NodeType.tertiary, OPS.tertiary);
+      let result = new SynTree(this, NodeType.ternary, OPS.ternary);
       result.children = this._tree.splice(idx, 5, result);
     }
     return true;
