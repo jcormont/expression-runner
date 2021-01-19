@@ -103,7 +103,19 @@ test("Use multiple expressions", (t) => {
   t.expect(compile("a += 1", true)(context), 2);
   t.expect(compile("a += 1; str(a)", true)(context), "3");
   t.expect(compile("a += 1\nstr(a)", true)(context), "4");
-  t.expect(compile("[3, 2, 1]\nsort($_)\n$_[0]")(), 1);
+  t.expect(compile("a += 1\n;str(a)", true)(context), "5");
+  t.expect(compile(";a += 1;;;str(a);", true)(context), "6");
+  t.expect(compile("arr = [3, 2, 1]\narr = sort(arr)\narr[0]", true)(), 1);
+});
+
+test("Use if statement", (t) => {
+  let context = { a: 1, b: 0 };
+  t.expect(compile("if (a) a", true)(context), 1);
+  t.expect(compile("if (b) a;", true)(context), undefined);
+  t.expect(compile("if (a && !b) { a = 41 }; a", true)(context), 41);
+  t.expect(compile("if (a && !b) { a }", true)(context), 41);
+  t.expect(compile("if (a && !b) { b, a }", true)(context), 41);
+  t.expect(compile("if (a && !b) { b; a }", true)(context), 41);
 });
 
 console.log("Done!");

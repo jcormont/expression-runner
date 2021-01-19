@@ -5,7 +5,6 @@ const RESOLVE_FN = "$r";
 const ASSIGN_FN = "$as";
 const CALL_FN = "$c";
 const DEFINE_FN = "$fn";
-const TOP_FN = "$_";
 const DEFINED_FN_MARKER = "$_RUNTIME_DEFINED_$";
 
 // convert safe operators to a lookup table
@@ -151,7 +150,7 @@ export abstract class Runtime {
   static scopeFactory(compiled: any[]): new (vars?: any, functions?: any) => Runtime {
     let expand = (n: any) => (Array.isArray(n) ? makeCode(n) : JSON.stringify(n));
     let follow = (n: any[]) => n.map(expand).join(",");
-    let makeCode = (expr: any[], isTop?: boolean): string => {
+    let makeCode = (expr: any[]): string => {
       if (!expr || !Array.isArray(expr)) throw new SyntaxError(JSON.stringify(expr));
       switch (expr[0]) {
         case OPS.assign:
@@ -173,14 +172,7 @@ export abstract class Runtime {
             ")"
           );
         case OPS.expression:
-          return isTop
-            ? expr.length === 2 && Array.isArray(expr[1])
-              ? TOP_FN + "(" + makeCode(expr[1], true) + ")"
-              : expr
-                  .slice(1)
-                  .map((n) => TOP_FN + "(" + expand(n) + ")")
-                  .join(",\n")
-            : "(" + follow(expr.slice(1)) + ")";
+          return "(" + follow(expr.slice(1)) + ")";
         case OPS.arrowfunc:
           let arrowArgs = expr.slice(1, -1);
           let code = arrowArgs.map((s, i) => ASSIGN_FN + "('=',1,_$p" + i + ",'" + s + "')");
@@ -193,8 +185,14 @@ export abstract class Runtime {
             code.join() +
             ") })"
           );
-        case OPS.tertiary:
-          return "((" + expand(expr[1]) + ")?(" + expand(expr[2]) + "):(" + expand(expr[3]) + "))";
+        case OPS.ternary:
+          return (
+            expand(expr[1]) +
+            "?" +
+            expand(expr[2] || [OPS.undef]) +
+            ":" +
+            expand(expr[3] || [OPS.undef])
+          );
         case OPS.calc:
           let calcResult = "(" + expand(expr[1]) + ")";
           for (let idx = 2; idx < expr.length; idx += 2) {
@@ -216,7 +214,7 @@ export abstract class Runtime {
           return calcResult;
         case OPS.unary:
           if (UNARY_SAFE[expr[1]] !== _safe_) throw new SyntaxError(expr[1]);
-          return expr[1] + "(" + expand(expr[2]) + ")";
+          return "(" + expr[1] + "(" + expand(expr[2]) + ")" + ")";
         case OPS.call:
           return CALL_FN + "(" + follow(expr.slice(1)) + ")";
         case OPS.object:
@@ -256,24 +254,17 @@ export abstract class Runtime {
 
     // create the actual runner function
     let runner = new Function(
-      TOP_FN,
       CALL_FN,
       DEFINE_FN,
       RESOLVE_FN,
       ASSIGN_FN,
-      "return " + makeCode(<any>compiled, true)
+      "return " + makeCode(<any>compiled)
     );
 
     // return a specific class with this runner
     class CompiledRuntime extends Runtime {
       run() {
-        return runner(
-          this._top_fn,
-          this._call_fn,
-          this._define_fn,
-          this._resolve_fn,
-          this._assign_fn
-        );
+        return runner(this._call_fn, this._define_fn, this._resolve_fn, this._assign_fn);
       }
     }
     return CompiledRuntime;
@@ -294,13 +285,7 @@ export abstract class Runtime {
   /** Runs the expression and returns its result */
   abstract run(): any;
 
-  /** Set $_ variable to given value (to be assigned using `set` clause) */
-  setResult(result: any) {
-    this.vars.$_ = result;
-  }
-
   // bound private functions:
-  private _top_fn = (result: any) => (this.vars.$_ = result);
   private _resolve_fn = (
     coalesce: boolean,
     isVar: boolean,

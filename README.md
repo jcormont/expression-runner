@@ -1,6 +1,6 @@
 # Expression Runner
 
-Simple JavaScript expression compiler: given a JavaScript expression as a string, generates a function that evaluates the expression.
+Simple JavaScript-like script compiler and sandbox runner. Given a script as a string, the compiler generates a function, which evaluates the expression without access to the context of the calling code.
 
 **Install:** `npm install expression-runner`
 
@@ -8,36 +8,28 @@ Simple JavaScript expression compiler: given a JavaScript expression as a string
 
 ## Syntax
 
-The following JavaScript syntax is allowed within compiled expressions:
+Expression-runner has limited support for statements:
+
+- if, else
+- while
+- for, for...in, for...of
+- continue, break
+- let, const
+- function, return
+
+The following JavaScript syntax is allowed within expressions:
 
 - literal tokens (strings, numbers, etc. but not regular expressions)
-- array and object literals (e.g. `[1, 2]`, `{ a: 1 }`, `{ a, b }`)
+- array and object literals (e.g. `[1, 2]`, `{ a: 1 }`, `{ a, b, ...c }`)
 - function literals (e.g. `(a) => a + 1`, but only using a single expression)
 - variables and property access
 - function and method calls
-- calculations with one or more operands, brackets, etc.
+- calculations with one or more operands, brackets, typeof, delete, etc.
 - null-coalescing expressions using `??` and `?.` operators
 - tertiary expressions (e.g. `a ? b : c`)
 - assignments (top-level only, e.g. `a = 1`, `b += 2`), but _not_ `++` and `--`
 
-Function calls may include calls to default functions (see list below), as well as 'safe' methods on strings, numbers, arrays, dates, and the RegExp `test` method; these do not modify anything other than the original value.
-
-## Multiple expressions
-
-Multiple expressions are allowed, separated by semicolons OR newlines.
-
-Only the result of the last expression is returned by the compiled function, however each intermediate result is available as `$_` .
-
-This allows for running a block of expressions, although branching and looping is not available (since statements are not compiled).
-
-```js
-[3, 2, 1]
-sort($_)
-$_.map(i => "(" + i + ")")
-$_.join(",")
-```
-
-The code above results in the string `"(1),(2),(3)"`
+Notably, support for `new` is missing, along with other prototype-based features and 'standard library' objects. Function calls may only include calls to default functions (see list below), as well as 'safe' methods on strings, numbers, arrays, dates, and the RegExp `test` method; these do not modify anything other than the original value.
 
 ## Usage: as single function
 
