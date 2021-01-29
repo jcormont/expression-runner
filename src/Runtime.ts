@@ -255,7 +255,6 @@ export abstract class Runtime {
     };
 
     // create the actual runner function
-    console.log("CODE: ", makeCode(<any>compiled, true));
     let runner = new Function(
       TOP_FN,
       CALL_FN,
