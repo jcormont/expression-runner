@@ -166,9 +166,9 @@ export abstract class Runtime {
             JSON.stringify(expr[2]) +
             "," +
             isVarToAssign +
-            "," +
+            ",(" +
             valueExpr +
-            "," +
+            ")," +
             lhsExpr +
             ")"
           );
@@ -183,17 +183,20 @@ export abstract class Runtime {
             : "(" + follow(expr.slice(1)) + ")";
         case OPS.arrowfunc:
           let arrowArgs = expr.slice(1, -1);
-          if (arrowArgs.some((s) => !/^[a-zA-Z_$][\w$]*$/.test(s)))
-            throw new SyntaxError(arrowArgs.toString());
-          let code = arrowArgs.map((s) => ASSIGN_FN + "('=',1," + s + ",'" + s + "')");
+          let code = arrowArgs.map((s, i) => ASSIGN_FN + "('=',1,_$p" + i + ",'" + s + "')");
           code.push(expand(expr[expr.length - 1]));
           return (
-            DEFINE_FN + "(function(" + arrowArgs.join(",") + "){ return " + code.join() + " })"
+            DEFINE_FN +
+            "(function(" +
+            arrowArgs.map((_s, i) => "_$p" + i).join(",") +
+            "){ return (" +
+            code.join() +
+            ") })"
           );
         case OPS.tertiary:
-          return expand(expr[1]) + "?" + expand(expr[2]) + ":" + expand(expr[3]);
+          return "((" + expand(expr[1]) + ")?(" + expand(expr[2]) + "):(" + expand(expr[3]) + "))";
         case OPS.calc:
-          let calcResult = expand(expr[1]);
+          let calcResult = "(" + expand(expr[1]) + ")";
           for (let idx = 2; idx < expr.length; idx += 2) {
             if (expr[idx] === "??") {
               calcResult =
@@ -207,7 +210,7 @@ export abstract class Runtime {
                 ")";
             } else {
               if (CALC_SAFE[expr[idx]] !== _safe_) throw new SyntaxError();
-              calcResult += " " + expr[idx] + " " + expand(expr[idx + 1]);
+              calcResult += " " + expr[idx] + " (" + expand(expr[idx + 1]) + ")";
             }
           }
           return calcResult;
@@ -220,7 +223,7 @@ export abstract class Runtime {
           let objMembers: string[] = [];
           for (let idx = 1; idx < expr.length; idx++) {
             if (Array.isArray(expr[idx]) && expr[idx][0] === OPS.spread) {
-              objMembers.push("..." + expand(expr[idx][1]));
+              objMembers.push("...(" + expand(expr[idx][1]) + ")");
             } else {
               let prop = expand(expr[idx++]);
               let val = expand(expr[idx]);
@@ -232,7 +235,7 @@ export abstract class Runtime {
           let arrElts: string[] = [];
           for (let idx = 1; idx < expr.length; idx++) {
             if (Array.isArray(expr[idx]) && expr[idx][0] === OPS.spread) {
-              arrElts.push("..." + expand(expr[idx][1]));
+              arrElts.push("...(" + expand(expr[idx][1]) + ")");
             } else {
               arrElts.push(expand(expr[idx]));
             }
@@ -252,6 +255,7 @@ export abstract class Runtime {
     };
 
     // create the actual runner function
+    console.log("CODE: ", makeCode(<any>compiled, true));
     let runner = new Function(
       TOP_FN,
       CALL_FN,

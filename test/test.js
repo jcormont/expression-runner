@@ -52,6 +52,7 @@ test("Use operators", (t) => {
   t.expect(compile("a + b")(context), 3);
   t.expect(compile("b * a + 8")(context), 10);
   t.expect(compile("a + b * 2")(context), 5);
+  t.expect(compile("'x' + (a ? 'y' : '0') + 'z'")(context), "xyz");
 });
 
 test("Use object spread", (t) => {
@@ -86,9 +87,15 @@ test("Use null-coalescing", (t) => {
   t.expect(compile("b?.x ?? 2")(context), 2);
 });
 
-test("Use functions", (t) => {
+test("Use built-in functions", (t) => {
   t.expect(compile("str(0)")(), "0");
   t.expect(compile("abc()", false, { abc: () => 123 })({}), 123);
+});
+
+test("Use arrow functions", (t) => {
+  t.expect(compile("(()=>41)()")(), 41);
+  t.expect(compile("((a)=>41 + a)(1)")(), 42);
+  t.expect(compile("f=()=>41;f()", true)(), 41);
 });
 
 test("Use multiple expressions", (t) => {
