@@ -801,7 +801,7 @@ export class Compiler {
   static readonly _regex: { [id: string]: RegExp } = {
     space: /^(?:\\\r?\n|\s+)/,
     numberHex: /^0x[0-9A-F]+/,
-    number: /^(?=[1-9]|0(?!\d))[_\d]+(\.\d+)?([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?/,
+    number: /^(?:(?=[1-9]|0(?!\d))[_\d]+(\.\d+)?([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?)/,
     stringDbl: /^\"(?:[^\\\"]+|\\["'\\bfnrt\/]|\\u[0-9a-f]{4})*\"/,
     stringSgl: /^\'(?:[^\\\']+|\\["'\\bfnrt\/]|\\u[0-9a-f]{4})*\'/,
     id: /^@?[a-zA-Z_$][\w$]*/,
